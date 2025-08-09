@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "183572523983",
+    "project_id": "habitosalimenticiostnt",
+    "storage_bucket": "habitosalimenticiostnt.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:183572523983:android:f72a6ab099070126c8c0ba",
+        "android_client_info": {
+          "package_name": "com.example.habitosalimenticios"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCfVuxBZHOwMJoozCQF985KyZHCgvRwBEE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
