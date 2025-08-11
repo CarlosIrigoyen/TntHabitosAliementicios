@@ -1,52 +1,105 @@
 package com.example.habitosalimenticios
 
+import android.app.Application
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.habitosalimenticios.ui.LoginScreen
+import com.example.habitosalimenticios.ui.encuestado.EncuestadoFormScreen
+import com.example.habitosalimenticios.ui.encuestado.EncuestadoViewModel
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.ktx.Firebase
 
 class MainActivity : ComponentActivity() {
 
+    // opcional: inicializamos aquí
     private lateinit var auth: FirebaseAuth
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Inicializar FirebaseAuth
+        // inicializar auth
         auth = Firebase.auth
 
         setContent {
             val context = LocalContext.current
-            val firebaseUser = remember { mutableStateOf(auth.currentUser) }
+            // estado del usuario actual (null si no hay sesión)
+            val firebaseUser = remember { mutableStateOf<FirebaseUser?>(Firebase.auth.currentUser) }
+
+            // Listener de Auth que actualiza el state de firebaseUser
+            DisposableEffect(Unit) {
+                val listener = FirebaseAuth.AuthStateListener { a ->
+                    firebaseUser.value = a.currentUser
+                }
+                Firebase.auth.addAuthStateListener(listener)
+                onDispose {
+                    Firebase.auth.removeAuthStateListener(listener)
+                }
+            }
 
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    // Si hay usuario logueado, comprobamos si existe el Encuestado en BD
                     if (firebaseUser.value != null) {
-                        WelcomeScreen(
-                            email = firebaseUser.value?.email ?: "Usuario",
-                            onSignOut = {
-                                auth.signOut()
-                                firebaseUser.value = null
+                        val uid = firebaseUser.value!!.uid
+
+                        // Creamos el ViewModel (AndroidViewModel) con factory
+                        val application = LocalContext.current.applicationContext as Application
+                        val encuestadoVm: EncuestadoViewModel = viewModel(
+                            key = "encuestado_vm_$uid",
+                            factory = object : ViewModelProvider.Factory {
+                                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                    @Suppress("UNCHECKED_CAST")
+                                    return EncuestadoViewModel(application) as T
+                                }
                             }
                         )
+
+                        // Observamos el Flow<Encuestado?>; si es null -> mostrar formulario
+                        val encuesta by encuestadoVm.observeEncuestadoFlow(uid).collectAsState(initial = null)
+
+                        if (encuesta == null) {
+                            // Mostrar formulario para completar datos del encuestado
+                            EncuestadoFormScreen(
+                                onSaved = {
+                                    // El propio ViewModel en EncuestadoFormScreen guarda los datos.
+                                    // Aquí solo mostramos un toast opcional; la observación del Flow
+                                    // hará que la UI pase automáticamente a WelcomeScreen.
+                                    Toast.makeText(context, "Guardando datos...", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        } else {
+                            // Si ya existe, mostramos la pantalla de bienvenida
+                            WelcomeScreen(
+                                email = firebaseUser.value?.email ?: "Usuario",
+                                onSignOut = {
+                                    Firebase.auth.signOut()
+                                    Toast.makeText(context, "Sesión cerrada", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
                     } else {
+                        // Si no hay usuario logueado, mostramos pantalla de login
                         LoginScreen(
                             onLoginSuccess = { userEmail ->
+                                // No necesitamos navegar manualmente: el AuthStateListener actualizará firebaseUser
                                 Toast.makeText(context, "Logueado como $userEmail", Toast.LENGTH_SHORT).show()
-                                firebaseUser.value = auth.currentUser
                             },
                             onError = { message ->
                                 Toast.makeText(context, message, Toast.LENGTH_LONG).show()
@@ -56,82 +109,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-}
-
-@Composable
-fun LoginScreen(onLoginSuccess: (String) -> Unit, onError: (String) -> Unit) {
-    val auth = Firebase.auth
-
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = "Iniciar sesión", style = MaterialTheme.typography.headlineSmall)
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { Text("Correo electrónico") },
-            modifier = Modifier.fillMaxWidth(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("Contraseña") },
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            singleLine = true
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = {
-                if (email.isBlank() || password.isBlank()) {
-                    onError("Completá email y contraseña")
-                    return@Button
-                }
-                loading = true
-
-                auth.signInWithEmailAndPassword(email.trim(), password)
-                    .addOnCompleteListener { signInTask ->
-                        loading = false
-                        if (signInTask.isSuccessful) {
-                            onLoginSuccess(email.trim())
-                        } else {
-                            val msg = signInTask.exception?.message ?: "Error al iniciar sesión"
-                            onError(msg)
-                        }
-                    }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !loading
-        ) {
-            if (loading) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            Text(text = "Ingresar")
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
     }
 }
 
